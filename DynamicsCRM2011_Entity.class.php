@@ -283,7 +283,7 @@ class DynamicsCRM2011_Entity extends DynamicsCRM2011 {
 				return;
 			}
 			/* Check the new value is the right type of Entity */
-			if (!in_array($value->entityLogicalName, $this->properties[$property]['lookupTypes'])) {
+			if (!in_array($value->entityLogicalName, $this->properties[$property]['lookupTypes']) && strtolower($value->entityLogicalName) !== 'partylist') {
 				$trace = debug_backtrace();
 				trigger_error('Property '.$property.' of the '.$this->entityLogicalName
 						.' entity must be a '.implode(' or ', $this->properties[$property]['lookupTypes'])
@@ -470,7 +470,7 @@ class DynamicsCRM2011_Entity extends DynamicsCRM2011 {
 	 */
 	private function setID($value) {
 		/* Only allow setting the ID once */
-		if ($this->entityID != NULL) {
+		if ($this->entityID != NULL && $this->entityID != '00000000-0000-0000-0000-000000000000') {
 			throw new Exception('Cannot change the ID of an Entity');
 		}
 		$this->entityID = $value;
@@ -534,12 +534,17 @@ class DynamicsCRM2011_Entity extends DynamicsCRM2011 {
 				$propertyNode->appendChild($entityDOM->createElement('c:key', $property));
 				/* Check the Type of the Value */
 				if ($propertyDetails['isLookup']) {
-					/* Special handling for Lookups - use an EntityReference, not the AttributeType */
-					$valueNode = $propertyNode->appendChild($entityDOM->createElement('c:value'));
-					$valueNode->setAttribute('i:type', 'b:EntityReference');
-					$valueNode->appendChild($entityDOM->createElement('b:Id', $this->propertyValues[$property]['Value']->ID));
-					$valueNode->appendChild($entityDOM->createElement('b:LogicalName', $this->propertyValues[$property]['Value']->entityLogicalName));
-					$valueNode->appendChild($entityDOM->createElement('b:Name'))->setAttribute('i:nil', 'true');
+					if(strtolower($propertyDetails['Type']) === 'partylist') {
+						$propertyNode->appendChild($entityDOM->importNode($this->propertyValues[$property]['Value']->getEntityDOM(), true));
+					}
+					else {
+						/* Special handling for Lookups - use an EntityReference, not the AttributeType */
+						$valueNode = $propertyNode->appendChild($entityDOM->createElement('c:value'));
+						$valueNode->setAttribute('i:type', 'b:EntityReference');
+						$valueNode->appendChild($entityDOM->createElement('b:Id', $this->propertyValues[$property]['Value']->ID));
+						$valueNode->appendChild($entityDOM->createElement('b:LogicalName', $this->propertyValues[$property]['Value']->entityLogicalName));
+						$valueNode->appendChild($entityDOM->createElement('b:Name'))->setAttribute('i:nil', 'true');
+					}
 				} else {
 					/* Determine the Type, Value and XML Namespace for this field */
 					$xmlValue = $this->propertyValues[$property]['Value'];
@@ -748,6 +753,9 @@ class DynamicsCRM2011_Entity extends DynamicsCRM2011 {
 				case 'int':
 					/* Int - Cast the String to an Int */
 					$storedValue = (int)$attributeValue;
+					break;
+				case 'Money':
+					$storedValue = $attributeValue;
 					break;
 				case 'OptionSetValue':
 					/* OptionSetValue - We need the Numerical Value for Updates, Text for Display */

@@ -2035,7 +2035,7 @@ class DynamicsCRM2011_Connector extends DynamicsCRM2011 {
 		/* Turn this into a SOAP request, and send it */
 		$createRequest = self::generateSoapRequest($this->organizationURI, $this->getOrganizationCreateAction(), $securityToken, $createNode, $this->callerId);
 		$soapResponse = self::getSoapResponse($this->organizationURI, $createRequest);
-		
+
 		if (self::$debugMode) echo PHP_EOL.'Create Response: '.PHP_EOL.$soapResponse.PHP_EOL.PHP_EOL;
 		
 		/* Load the XML into a DOMDocument */
@@ -2072,6 +2072,156 @@ class DynamicsCRM2011_Connector extends DynamicsCRM2011 {
 		$createNode->appendChild($createRequestDOM->importNode($entity->getEntityDOM(), true));
 		/* Return the DOMNode */
 		return $createNode;
+	}
+
+	/**
+	 * Instantiate a template and return the created email entity guid
+	 *
+	 * @param DynamicsCRM2011_Connector $conn
+	 * @param String $templateId
+	 * @param DynamicsCRM2011_Entity $recipient
+	 * @param DynamicsCRM2011_Entity $sender
+	 * @param String $pagingCookie
+	 * @return String Email id
+	 */
+	public function instantiateTemplate($conn, $templateId, $sender, $recipient, $pagingCookie = NULL) {
+		$securityToken = $this->getOrganizationSecurityToken();
+
+		$executeNode = self::generateInstantiateTemplateRequest($templateId, $recipient);
+
+		$retrieveRecordChangeHistorySoapRequest = self::generateSoapRequest($this->organizationURI, $this->getOrganizationExecuteAction(), $securityToken, $executeNode, $this->callerId);
+		
+		$soapResponse = self::getSoapResponse($this->organizationURI, $retrieveRecordChangeHistorySoapRequest);
+
+		$soapResponseDOM = new DOMDocument();
+		$soapResponseDOM->loadXML($soapResponse);
+		
+		$mailDOM = $soapResponseDOM->getElementsByTagName('ExecuteResponse')[0]
+			->getElementsByTagName('ExecuteResult')[0]
+			->getElementsByTagName('Results')[0]
+			->getElementsByTagName('KeyValuePairOfstringanyType')[0]
+			->getElementsByTagName('value')[0]
+			->getElementsByTagName('Entities')[0]
+			->getElementsByTagName('Entity')[0];
+
+		$entity = DynamicsCRM2011_Entity::fromDOM($conn, 'email', $mailDOM);
+
+		$toActivity = DynamicsCRM2011_Entity::fromLogicalName($conn, 'activityparty');
+		$toActivity->partyid = $recipient;
+
+		$fromActivity = DynamicsCRM2011_Entity::fromLogicalName($conn, 'activityparty');
+		$fromActivity->partyid = $sender;
+
+
+		$email = DynamicsCRM2011_Entity::fromLogicalName($conn, 'email');
+		$email->description = $entity->description;
+		$email->subject = $entity->subject;
+
+		$toParty = new DynamicsCRM2011_ArrayOfEntity();
+		$toParty->addEntity($toActivity);
+
+		$fromParty = new DynamicsCRM2011_ArrayOfEntity();
+		$fromParty->addEntity($fromActivity);
+
+		$email->to = $toParty;
+		$email->from = $fromParty;
+
+		return $this->create($email);
+	}
+
+	/** 
+	 * Generate an Instantiate Template Request
+	 * @ignore
+	 */
+	protected static function generateInstantiateTemplateRequest($templateId, $recipient) {
+		$dom = new DOMDocument();
+		$executeNode = $dom->appendChild($dom->createElementNS('http://schemas.microsoft.com/xrm/2011/Contracts/Services', 'Execute'));
+		$requestNode = $executeNode->appendChild($dom->createElement('request'));
+		$requestNode->setAttributeNS('http://www.w3.org/2001/XMLSchema-instance', 'i:type', 'c:InstantiateTemplateRequest');
+		$requestNode->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:b', 'http://schemas.microsoft.com/xrm/2011/Contracts');
+		$requestNode->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:c', 'http://schemas.microsoft.com/crm/2011/Contracts');
+		$parametersNode = $requestNode->appendChild($dom->createElement('b:Parameters'));
+		$parametersNode->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:d', 'http://schemas.datacontract.org/2004/07/System.Collections.Generic');
+
+		$keyValuePairNode1 = $parametersNode->appendChild($dom->createElement('b:KeyValuePairOfstringanyType'));
+		$keyValuePairNode1->appendChild($dom->createElement('d:key', 'TemplateId'));
+		$valueNode1 = $keyValuePairNode1->appendChild($dom->createElement('d:value', $templateId));
+		$valueNode1->setAttribute('i:type', 'c:guid');
+		$valueNode1->setAttribute('xmlns:c', 'http://schemas.microsoft.com/2003/10/Serialization/');
+
+		$keyValuePairNode2 = $parametersNode->appendChild($dom->createElement('b:KeyValuePairOfstringanyType'));
+		$keyValuePairNode2->appendChild($dom->createElement('d:key', 'ObjectId'));
+		$valueNode2 = $keyValuePairNode2->appendChild($dom->createElement('d:value', $recipient->ID));
+		$valueNode2->setAttribute('i:type', 'c:guid');
+		$valueNode2->setAttribute('xmlns:c', 'http://schemas.microsoft.com/2003/10/Serialization/');
+
+		$keyValuePairNode3 = $parametersNode->appendChild($dom->createElement('b:KeyValuePairOfstringanyType'));
+		$keyValuePairNode3->appendChild($dom->createElement('d:key', 'ObjectType'));
+		$valueNode3 = $keyValuePairNode3->appendChild($dom->createElement('d:value', $recipient->logicalName));
+		$valueNode3->setAttribute('i:type', 'c:string');
+		$valueNode3->setAttribute('xmlns:c', 'http://www.w3.org/2001/XMLSchema');
+		
+		$requestNode->appendChild($dom->createElement('b:RequestId'))->setAttribute('i:nil', 'true');
+		$requestNode->appendChild($dom->createElement('b:RequestName', 'InstantiateTemplate'));
+		
+		return $executeNode;
+	}
+
+	/**
+	 * Send a mail
+	 *
+	 * @param String $mailId
+	 * @param String $pagingCookie
+	 */
+	public function sendEmail($mailId, $pagingCookie = NULL) {
+		/* Send the sequrity request and get a security token */
+		$securityToken = $this->getOrganizationSecurityToken();
+		/* Generate the XML for the Body */
+		$executeNode = self::generateSendEmailRequest($mailId);
+		/* Turn this into a SOAP request, and send it */
+		$soapRequest = self::generateSoapRequest($this->organizationURI, $this->getOrganizationExecuteAction(), $securityToken, $executeNode, $this->callerId);
+		
+		$soapResponse = self::getSoapResponse($this->organizationURI, $soapRequest);
+		
+		return $soapResponse;
+	}
+
+	/** 
+	 * Generate a Send Mail Request
+	 * @ignore
+	 */
+	protected static function generateSendEmailRequest($mailId) {
+		$dom = new DOMDocument();
+		$executeNode = $dom->appendChild($dom->createElementNS('http://schemas.microsoft.com/xrm/2011/Contracts/Services', 'Execute'));
+		$requestNode = $executeNode->appendChild($dom->createElement('request'));
+		$requestNode->setAttributeNS('http://www.w3.org/2001/XMLSchema-instance', 'i:type', 'c:SendEmailRequest');
+		$requestNode->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:b', 'http://schemas.microsoft.com/xrm/2011/Contracts');
+		$requestNode->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:c', 'http://schemas.microsoft.com/crm/2011/Contracts');
+		$parametersNode = $requestNode->appendChild($dom->createElement('b:Parameters'));
+		$parametersNode->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:d', 'http://schemas.datacontract.org/2004/07/System.Collections.Generic');
+
+		$keyValuePairNode1 = $parametersNode->appendChild($dom->createElement('b:KeyValuePairOfstringanyType'));
+		$keyValuePairNode1->appendChild($dom->createElement('d:key', 'EmailId'));
+		$valueNode1 = $keyValuePairNode1->appendChild($dom->createElement('d:value', $mailId));
+		$valueNode1->setAttribute('i:type', 'c:guid');
+		$valueNode1->setAttribute('xmlns:c', 'http://schemas.microsoft.com/2003/10/Serialization/');
+
+		$keyValuePairNode2 = $parametersNode->appendChild($dom->createElement('b:KeyValuePairOfstringanyType'));
+		$keyValuePairNode2->appendChild($dom->createElement('d:key', 'IssueSend'));
+		$valueNode2 = $keyValuePairNode2->appendChild($dom->createElement('d:value', 'true'));
+		$valueNode2->setAttribute('i:type', 'c:boolean');
+		$valueNode2->setAttribute('xmlns:c', 'http://www.w3.org/2001/XMLSchema');
+
+		$keyValuePairNode3 = $parametersNode->appendChild($dom->createElement('b:KeyValuePairOfstringanyType'));
+		$keyValuePairNode3->appendChild($dom->createElement('d:key', 'TrackingToken'));
+		$valueNode3 = $keyValuePairNode3->appendChild($dom->createElement('d:value', ''));
+		$valueNode3->setAttribute('i:type', 'c:string');
+		$valueNode3->setAttribute('xmlns:c', 'http://www.w3.org/2001/XMLSchema');
+		
+		$requestNode->appendChild($dom->createElement('b:RequestId'))->setAttribute('i:nil', 'true');
+		$requestNode->appendChild($dom->createElement('b:RequestName', 'SendEmail'));
+		
+		return $executeNode;
 	}
 	
 	/**
